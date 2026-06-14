@@ -344,7 +344,7 @@ curl https://internal-api.corp/data
 -  SSH agent integration
 -  Proxy socket API
 
-**Target:** Working end-to-end by February 2026
+**Target:** Working end-to-end by July 2026
 
 ### Post-MVP (If Users Want It)
 - Export/import encrypted backups
