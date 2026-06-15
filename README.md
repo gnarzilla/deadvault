@@ -4,9 +4,11 @@
 ![zero deps](https://img.shields.io/badge/deps-zero-success)
 ![300 LOC crypto](https://img.shields.io/badge/crypto-ChaCha20--Poly1305-blue)
 
-> A local-first vault that auto-authenticates CLI tools and proxied requests when networks are hostile or nonexistent.
-
 [Why This Exists](#why-this-exists) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Integration](#proxy-integration) · [Roadmap](#roadmap)
+
+A local-first vault that auto-authenticates CLI tools and proxied requests when networks are hostile or nonexistent.
+
+> Status: MVP core working. Supports local vault init, encrypted credential add/list/show/delete, and `exec` token substitution. Security audit pending; not recommended for production secrets yet.
 
 ## Why this exists
 
@@ -21,11 +23,11 @@ Password managers solve this for browsers. Nothing solves it for terminals and p
 | **Authenticate through proxy.deadlight** | Browser extensions don't work with SOCKS/HTTP proxies | Vault talks to proxy via socket. Credentials injected server-side |
 | **Field laptop dies, switch to backup** | Cloud password managers need internet to sync | Export encrypted DB → USB stick → Import. 30 seconds, zero network |
 
-**vault.deadlight core purpose is to eliminate manual credential entry for CLI tools and proxies.**
+**deadvault core purpose is to eliminate manual credential entry for CLI tools and proxies.**
 
 ## Part of the Deadlight Ecosystem
 
-vault.deadlight extends **proxy.deadlight** with credential injection. Works standalone for CLI workflows, but shines when paired with the proxy.
+deadvault extends **deadlight-proxy** with credential injection. Works standalone for CLI workflows, but shines when paired with the proxy.
 
 ```
 ┌──────────────────────────────────────┐
@@ -58,8 +60,8 @@ vault.deadlight extends **proxy.deadlight** with credential injection. Works sta
 
 ```bash
 # Clone repository
-git clone https://github.com/gnarzilla/vault.deadlight
-cd vault.deadlight
+git clone https://github.com/gnarzilla/deadvault
+cd deadvault
 
 # Build (zero external dependencies)
 make
@@ -206,12 +208,6 @@ vault unlock
 # Delete credential
 vault delete github-api
 
-# Generate a new Identity for Federation
-./deadlight_vault add my-blog-identity \
-    --type identity \
-    --algo ed25519 \
-    --generate
-
 # Output: 
 # Public Key: dead...beef (Share this in your DNS TXT or Profile)
 # Private Key: (Stored encrypted in DB)
@@ -229,7 +225,7 @@ vault config set proxy.enabled true
 vault config set proxy.socket /var/run/deadlight_vault.sock
 
 # Restart proxy with vault integration
-# (proxy.deadlight will connect to socket on startup)
+# (deadlight-proxy will connect to socket on startup)
 ```
 
 ### How it works
@@ -237,8 +233,8 @@ vault config set proxy.socket /var/run/deadlight_vault.sock
 ```mermaid
 sequenceDiagram
     participant C as Client (curl)
-    participant P as proxy.deadlight
-    participant V as vault.deadlight
+    participant P as deadlight-proxy
+    participant V as deadvault
     participant R as Remote API
 
     C->>P: GET https://api.github.com/user
@@ -414,8 +410,8 @@ xcode-select --install
 ### Compile
 
 ```bash
-git clone https://github.com/gnarzilla/vault.deadlight
-cd vault.deadlight
+git clone https://github.com/gnarzilla/deadvault
+cd deadvault
 make
 
 # Output: ./deadlight_vault (~180KB)
@@ -446,7 +442,7 @@ make test-memory
 ## FAQ
 
 **Q: Why not just use `pass` or `gopass`?**  
-A: Those are great for managing passwords. vault.deadlight is focused on *auto-injection* into CLI tools and proxy.deadlight integration. Different goals.
+A: Those are great for managing passwords. deadvault is focused on *auto-injection* into CLI tools and proxy.deadlight integration. Different goals.
 
 **Q: Is this trying to replace 1Password/Bitwarden?**  
 A: No. Use those for browsers. This is for terminals and proxied connections.
