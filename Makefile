@@ -1,8 +1,9 @@
 # vault.deadlight Makefile
 # Minimal, portable, static binary target
 
-NAME       = deadlight_vault
+NAME       = deadvault
 CC         ?= gcc
+override CC = gcc
 CFLAGS     = -Wall -Wextra -O2 -std=c11 -D_POSIX_C_SOURCE=200809L
 LDFLAGS    =
 LDLIBS     = -lcrypto -lpthread -ldl -lm
@@ -35,7 +36,7 @@ TARGET = $(NAME)
 
 # === Includes =================================================================
 
-INCLUDES = -I$(INC_DIR) -I$(SQLITE_DIR)
+INCLUDES = -I$(INC_DIR) -I$(SQLITE_DIR) -Ilib/deadlight/c/auth
 
 # === Compiler flags ===========================================================
 
@@ -93,6 +94,10 @@ test: $(TARGET)
 	@./$(TARGET) --version || true
 	@./$(TARGET) --help || true
 	@echo "Manual test: ./$(TARGET) init"
+
+test-pbkdf2: $(SRC_DIR)/crypto_vault.o $(SRC_DIR)/pbkdf2_shim.o
+	@echo "Testing PBKDF2..."
+	# Test against RFC 6070 test vectors (optional, can be separate)
 
 # === Installation =============================================================
 

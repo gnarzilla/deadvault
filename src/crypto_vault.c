@@ -83,12 +83,14 @@ static void chacha20_init_state(uint32_t state[16],
     }
 }
 
-static void chacha20_xor(uint8_t *dst, const uint8_t *src, size_t len,
-                         const uint8_t key[32], const uint8_t nonce[12]) {
+static void chacha20_xor_counter(uint8_t *dst, const uint8_t *src, size_t len,
+                                 const uint8_t key[32],
+                                 const uint8_t nonce[12],
+                                 uint32_t initial_counter) {
     uint32_t state[16];
     uint32_t block[16];
     uint8_t keystream[64];
-    uint32_t counter = 0;
+    uint32_t counter = initial_counter;
 
     for (size_t i = 0; i < len; i += 64) {
         chacha20_init_state(state, key, nonce, counter++);
@@ -163,10 +165,24 @@ static void poly1305_mac(uint8_t mac[16], const uint8_t *msg, size_t len,
     while (len > 0) {
         uint8_t block[16] = {0};
         size_t block_len = (len < 16) ? len : 16;
+        uint32_t hibit = 0;
+
         memcpy(block, msg, block_len);
-        
-        // Add 0x01 padding byte
-        block[block_len] = 0x01;
+
+        /*
+        * Poly1305 appends a 1 bit after each block.
+        *
+        * For partial blocks, that 1 bit fits inside block[0..15].
+        * For full 16-byte blocks, the 1 bit is bit 128, represented
+        * as bit 24 of limb h[4] in the 26-bit limb layout.
+        *
+        * DO NOT write block[16]; that is out of bounds.
+        */
+        if (block_len < 16) {
+            block[block_len] = 0x01;
+        } else {
+            hibit = (1u << 24);
+        }
 
         // Load block into accumulator (little-endian)
         h[0] += ((uint32_t)block[0] | ((uint32_t)block[1] << 8) | 
@@ -177,8 +193,10 @@ static void poly1305_mac(uint8_t mac[16], const uint8_t *msg, size_t len,
                  ((uint32_t)block[8] << 12) | ((uint32_t)block[9] << 20)) & 0x3ffffff;
         h[3] += (((uint32_t)block[9] >> 6) | ((uint32_t)block[10] << 2) | 
                  ((uint32_t)block[11] << 10) | ((uint32_t)block[12] << 18)) & 0x3ffffff;
-        h[4] += (((uint32_t)block[12] >> 8) | ((uint32_t)block[13]) | 
-                 ((uint32_t)block[14] << 8) | ((uint32_t)block[15] << 16));
+        h[4] += (((uint32_t)block[13]) |
+                 ((uint32_t)block[14] << 8) |
+                 ((uint32_t)block[15] << 16) |
+                 hibit);
 
         // h = (h * r) mod (2^130 - 5)
         d[0] = (uint64_t)h[0] * r[0] + (uint64_t)h[1] * (r[4] * 5) + 
@@ -238,19 +256,25 @@ static void poly1305_mac(uint8_t mac[16], const uint8_t *msg, size_t len,
 int chacha20_poly1305_encrypt(const uint8_t *plaintext, size_t plaintext_len,
                                const uint8_t key[32], const uint8_t nonce[12],
                                uint8_t *ciphertext, uint8_t mac[16]) {
-    // Generate Poly1305 key from first ChaCha20 block
     uint8_t poly_key[64];
+    uint8_t zero_block[64];
+
     memset(poly_key, 0, sizeof(poly_key));
-    chacha20_xor(poly_key, poly_key, 64, key, nonce);
+    memset(zero_block, 0, sizeof(zero_block));
 
-    // Encrypt plaintext
-    chacha20_xor(ciphertext, plaintext, plaintext_len, key, nonce);
+    /*
+     * RFC 7539 layout:
+     * - counter 0 generates the one-time Poly1305 key
+     * - counter 1+ encrypts the plaintext
+     */
+    chacha20_xor_counter(poly_key, zero_block, 64, key, nonce, 0);
 
-    // Compute MAC over ciphertext
+    chacha20_xor_counter(ciphertext, plaintext, plaintext_len, key, nonce, 1);
+
     poly1305_mac(mac, ciphertext, plaintext_len, poly_key);
 
-    // Secure wipe of Poly1305 key
-    memset(poly_key, 0, sizeof(poly_key));
+    secure_zero(poly_key, sizeof(poly_key));
+    secure_zero(zero_block, sizeof(zero_block));
 
     return 0;
 }
@@ -258,31 +282,36 @@ int chacha20_poly1305_encrypt(const uint8_t *plaintext, size_t plaintext_len,
 int chacha20_poly1305_decrypt(const uint8_t *ciphertext, size_t ciphertext_len,
                                const uint8_t mac[16], const uint8_t key[32],
                                const uint8_t nonce[12], uint8_t *plaintext) {
-    // Generate Poly1305 key from first ChaCha20 block
     uint8_t poly_key[64];
-    memset(poly_key, 0, sizeof(poly_key));
-    chacha20_xor(poly_key, poly_key, 64, key, nonce);
+    uint8_t zero_block[64];
 
-    // Verify MAC
+    memset(poly_key, 0, sizeof(poly_key));
+    memset(zero_block, 0, sizeof(zero_block));
+
+    /*
+     * RFC 7539 layout:
+     * - counter 0 generates the one-time Poly1305 key
+     * - counter 1+ decrypts the ciphertext
+     */
+    chacha20_xor_counter(poly_key, zero_block, 64, key, nonce, 0);
+
     uint8_t computed_mac[16];
     poly1305_mac(computed_mac, ciphertext, ciphertext_len, poly_key);
 
-    // Constant-time comparison
     uint8_t diff = 0;
     for (int i = 0; i < 16; i++) {
         diff |= mac[i] ^ computed_mac[i];
     }
 
-    // Secure wipe
-    memset(poly_key, 0, sizeof(poly_key));
-    memset(computed_mac, 0, sizeof(computed_mac));
+    secure_zero(poly_key, sizeof(poly_key));
+    secure_zero(zero_block, sizeof(zero_block));
+    secure_zero(computed_mac, sizeof(computed_mac));
 
     if (diff != 0) {
-        return -1; // Authentication failed
+        return -1;
     }
 
-    // Decrypt
-    chacha20_xor(plaintext, ciphertext, ciphertext_len, key, nonce);
+    chacha20_xor_counter(plaintext, ciphertext, ciphertext_len, key, nonce, 1);
 
     return 0;
 }

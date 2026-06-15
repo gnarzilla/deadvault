@@ -46,10 +46,13 @@ static void print_usage(const char *prog) {
     printf("Usage: %s <command> [options]\n\n", prog);
     printf("Commands:\n");
     printf("  init                     Initialize vault (creates DB)\n");
+    printf("  unlock                   Verify master password (non-persistent MVP)\n");
+    printf("  lock                     Lock vault (wipe master key)\n");
     printf("  add <name>               Add credential\n");
     printf("    --type <type>          Type: token, password, ssh_key\n");
     printf("    --value <val>          Value (prompt if omitted)\n");
     printf("    --file <path>          Read value from file\n");
+    printf("    --metadata <json>      Optional metadata\n");
     printf("  list                     List credential names\n");
     printf("  show <name>              Show credential metadata\n");
     printf("  exec <name> -- <cmd>     Inject credential into command\n");
@@ -69,59 +72,146 @@ static void print_usage(const char *prog) {
     printf("\n");
 }
 
+/* ============================================================================
+ * Command: unlock
+ * ============================================================================ */
+
+static int cmd_unlock(vault_t *vault, int argc, char **argv) {
+    if (!vault) {
+        fprintf(stderr, "Error: Failed to open vault\n");
+        return -1;
+    }
+
+    const char *password = NULL;
+
+    /* Parse --password flag */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) {
+            password = argv[++i];
+            break;
+        }
+    }
+
+    fprintf(stderr, "Unlocking vault...\n");
+    if (vault_unlock(vault, password) != 0) {
+        fprintf(stderr, "Error: Failed to unlock vault (wrong password?)\n");
+        return -1;
+    }
+
+    fprintf(stderr, "Vault unlocked.\n");
+    return 0;
+}
+
+/* ============================================================================
+ * Command: lock
+ * ============================================================================ */
+
+static int cmd_lock(vault_t *vault) {
+    if (!vault) {
+        return -1;
+    }
+
+    if (vault_lock(vault) != 0) {
+        fprintf(stderr, "Error: Failed to lock vault\n");
+        return -1;
+    }
+
+    fprintf(stderr, "Vault locked (master key wiped from memory).\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     int ret = 0;
     const char *vault_path = NULL;
-    
-    /* Set up signal handlers */
+
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
-    
-    /* Parse early flags */
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_banner();
             print_usage(argv[0]);
             return 0;
         }
-        
+
         if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
             print_banner();
             return 0;
         }
-        
+
         if (strcmp(argv[i], "--vault-path") == 0 && i + 1 < argc) {
             vault_path = argv[++i];
         }
     }
-    
-    /* Need at least a command */
+
     if (argc < 2) {
         print_usage(argv[0]);
         return 1;
     }
-    
+
     const char *command = argv[1];
-    
-    /* Handle init separately (doesn't need existing vault) */
+
+    /*
+     * init creates a vault. It must not open/unlock an existing vault.
+     */
     if (strcmp(command, "init") == 0) {
         return cli_cmd_init(vault_path);
     }
-    
-    /* Open vault for all other commands */
+
+    /*
+     * Everything else needs an existing vault DB.
+     */
     g_vault = vault_open(vault_path);
     if (!g_vault) {
         fprintf(stderr, "Error: Failed to open vault\n");
         fprintf(stderr, "Run '%s init' to create a new vault\n", argv[0]);
         return 1;
     }
-    
-    /* Dispatch command */
+
+    /*
+     * Commands that do not need decryption.
+     */
+    if (strcmp(command, "list") == 0) {
+        ret = cli_cmd_list(g_vault);
+        goto cleanup;
+    }
+
+    /*
+     * unlock is non-persistent in MVP. Treat it as password verification.
+     */
+    if (strcmp(command, "unlock") == 0) {
+        ret = vault_unlock(g_vault, NULL);
+        if (ret == 0) {
+            fprintf(stderr, "Vault password verified. Note: unlock is non-persistent in MVP.\n");
+        } else {
+            fprintf(stderr, "Error: Failed to unlock vault\n");
+        }
+        goto cleanup;
+    }
+
+    /*
+     * lock is mostly a no-op in one-shot CLI mode, but harmless.
+     */
+    if (strcmp(command, "lock") == 0) {
+        ret = vault_lock(g_vault);
+        if (ret == 0) {
+            fprintf(stderr, "Vault locked.\n");
+        }
+        goto cleanup;
+    }
+
+    /*
+     * All remaining commands need the master key.
+     * For MVP, prompt each time.
+     */
+    if (vault_unlock(g_vault, NULL) != 0) {
+        fprintf(stderr, "Error: Failed to unlock vault\n");
+        ret = 1;
+        goto cleanup;
+    }
+
     if (strcmp(command, "add") == 0) {
         ret = cli_cmd_add(g_vault, argc - 1, &argv[1]);
-    }
-    else if (strcmp(command, "list") == 0) {
-        ret = cli_cmd_list(g_vault);
     }
     else if (strcmp(command, "show") == 0) {
         ret = cli_cmd_show(g_vault, argc - 1, &argv[1]);
@@ -143,11 +233,12 @@ int main(int argc, char **argv) {
         print_usage(argv[0]);
         ret = 1;
     }
-    
-    /* Cleanup */
+
+cleanup:
     if (g_vault) {
         vault_close(g_vault);
+        g_vault = NULL;
     }
-    
+
     return ret;
 }
