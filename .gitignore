@@ -1,0 +1,26 @@
+# build artifacts
+deadvault
+deadlight_vault
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# local vault data
+*.db
+*.vault
+*.enc
+.deadlight/
+vault.db
+
+# debug/crash
+core
+core.*
+*.log
+
+# editor/os
+.DS_Store
+.vscode/
+.idea/

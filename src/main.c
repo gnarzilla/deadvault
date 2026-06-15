@@ -72,54 +72,6 @@ static void print_usage(const char *prog) {
     printf("\n");
 }
 
-/* ============================================================================
- * Command: unlock
- * ============================================================================ */
-
-static int cmd_unlock(vault_t *vault, int argc, char **argv) {
-    if (!vault) {
-        fprintf(stderr, "Error: Failed to open vault\n");
-        return -1;
-    }
-
-    const char *password = NULL;
-
-    /* Parse --password flag */
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) {
-            password = argv[++i];
-            break;
-        }
-    }
-
-    fprintf(stderr, "Unlocking vault...\n");
-    if (vault_unlock(vault, password) != 0) {
-        fprintf(stderr, "Error: Failed to unlock vault (wrong password?)\n");
-        return -1;
-    }
-
-    fprintf(stderr, "Vault unlocked.\n");
-    return 0;
-}
-
-/* ============================================================================
- * Command: lock
- * ============================================================================ */
-
-static int cmd_lock(vault_t *vault) {
-    if (!vault) {
-        return -1;
-    }
-
-    if (vault_lock(vault) != 0) {
-        fprintf(stderr, "Error: Failed to lock vault\n");
-        return -1;
-    }
-
-    fprintf(stderr, "Vault locked (master key wiped from memory).\n");
-    return 0;
-}
-
 int main(int argc, char **argv) {
     int ret = 0;
     const char *vault_path = NULL;

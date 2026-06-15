@@ -87,6 +87,71 @@ int read_file(const char *path, uint8_t **value, size_t *value_len) {
     return 0;
 }
 
+static int starts_with_at(const char *s, const char *needle) {
+    size_t n = strlen(needle);
+    return strncmp(s, needle, n) == 0;
+}
+
+static char *replace_credential_tokens(const char *orig, const char *cred_value) {
+    if (!orig || !cred_value) {
+        return NULL;
+    }
+
+    const char *tok1 = "{TOKEN}";
+    const char *tok2 = "{PASSWORD}";
+
+    size_t tok1_len = strlen(tok1);
+    size_t tok2_len = strlen(tok2);
+    size_t cred_len = strlen(cred_value);
+
+    /*
+     * First pass: calculate exact output length.
+     */
+    size_t out_len = 0;
+    const char *p = orig;
+
+    while (*p) {
+        if (starts_with_at(p, tok1)) {
+            out_len += cred_len;
+            p += tok1_len;
+        } else if (starts_with_at(p, tok2)) {
+            out_len += cred_len;
+            p += tok2_len;
+        } else {
+            out_len++;
+            p++;
+        }
+    }
+
+    char *out = malloc(out_len + 1);
+    if (!out) {
+        return NULL;
+    }
+
+    /*
+     * Second pass: copy safely.
+     */
+    char *dst = out;
+    p = orig;
+
+    while (*p) {
+        if (starts_with_at(p, tok1)) {
+            memcpy(dst, cred_value, cred_len);
+            dst += cred_len;
+            p += tok1_len;
+        } else if (starts_with_at(p, tok2)) {
+            memcpy(dst, cred_value, cred_len);
+            dst += cred_len;
+            p += tok2_len;
+        } else {
+            *dst++ = *p++;
+        }
+    }
+
+    *dst = '\0';
+    return out;
+}
+
 /* ============================================================================
  * Command: init
  * ============================================================================ */
@@ -333,56 +398,25 @@ int cli_cmd_exec(vault_t *vault, int argc, char **argv) {
         return -1;
     }
 
-    /* Copy and substitute arguments */
+        /* Copy and substitute arguments */
     for (int i = 0; i < cmd_argc; i++) {
         const char *orig = argv[dash_idx + 1 + i];
-        
-        /* Check for substitution tokens */
+
         if (strstr(orig, "{TOKEN}") || strstr(orig, "{PASSWORD}")) {
-            /* Perform substitution */
-            size_t orig_len = strlen(orig);
-            size_t cred_len = strlen(cred_value);
-            size_t max_len = orig_len + cred_len;
-            
-            char *substituted = malloc(max_len + 1);
-            if (!substituted) {
-                for (int j = 0; j < i; j++) {
-                    free(cmd_argv[j]);
-                }
-                free(cmd_argv);
-                secure_zero(cred_value, strlen(cred_value));
-                free(cred_value);
-                return -1;
-            }
-
-            strcpy(substituted, orig);
-            
-            /* Replace {TOKEN} */
-            char *p = strstr(substituted, "{TOKEN}");
-            if (p) {
-                *p = '\0';
-                strcat(substituted, cred_value);
-                strcat(substituted, p + 7);  /* Skip past {TOKEN} */
-            }
-
-            /* Replace {PASSWORD} */
-            p = strstr(substituted, "{PASSWORD}");
-            if (p) {
-                *p = '\0';
-                strcat(substituted, cred_value);
-                strcat(substituted, p + 10);  /* Skip past {PASSWORD} */
-            }
-
-            cmd_argv[i] = substituted;
-        }
-        else {
+            cmd_argv[i] = replace_credential_tokens(orig, cred_value);
+        } else {
             cmd_argv[i] = strdup(orig);
         }
 
         if (!cmd_argv[i]) {
             for (int j = 0; j < i; j++) {
+                /*
+                 * These argv strings may contain credential material.
+                 */
+                secure_zero(cmd_argv[j], strlen(cmd_argv[j]));
                 free(cmd_argv[j]);
             }
+
             free(cmd_argv);
             secure_zero(cred_value, strlen(cred_value));
             free(cred_value);
@@ -401,7 +435,13 @@ int cli_cmd_exec(vault_t *vault, int argc, char **argv) {
     if (pid < 0) {
         perror("fork");
         for (int i = 0; i < cmd_argc; i++) {
-            free(cmd_argv[i]);
+            if (cmd_argv[i]) {
+                /*
+                * Some args may contain credential material.
+                */
+                secure_zero(cmd_argv[i], strlen(cmd_argv[i]));
+                free(cmd_argv[i]);
+            }
         }
         free(cmd_argv);
         return -1;
