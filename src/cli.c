@@ -152,6 +152,8 @@ static char *replace_credential_tokens(const char *orig, const char *cred_value)
     return out;
 }
 
+
+
 /* ============================================================================
  * Command: init
  * ============================================================================ */
@@ -254,32 +256,34 @@ int cli_cmd_add(vault_t *vault, int argc, char **argv) {
  * Command: list
  * ============================================================================ */
 
-int cli_cmd_list(vault_t *vault) {
-    if (!vault) {
+ int cli_cmd_list(vault_t *vault) {
+    if (!vault || vault_is_locked(vault)) {
+        fprintf(stderr, "Error: Vault not unlocked\n");
         return -1;
     }
 
-    char **names = NULL;
     int count = 0;
+    char **names = vault_list_credentials(vault, &count);
 
-    if (vault_list_credentials(vault, &count) != 0) {
+    if (!names) {
+        if (count == 0) {
+            printf("No credentials stored.\n");
+            return 0;
+        }
+
+        fprintf(stderr, "Error: Failed to list credentials\n");
         return -1;
-    }
-
-    if (count == 0) {
-        printf("No credentials stored.\n");
-        return 0;
     }
 
     printf("Credentials:\n");
+
     for (int i = 0; i < count; i++) {
-        /* Get metadata for type */
         credential_t *cred = vault_get_metadata(vault, names[i]);
+
         if (cred) {
             printf("  - %s (%s)\n", names[i], cred_type_to_string(cred->type));
             credential_free(cred);
-        }
-        else {
+        } else {
             printf("  - %s\n", names[i]);
         }
     }

@@ -123,10 +123,6 @@ int main(int argc, char **argv) {
     /*
      * Commands that do not need decryption.
      */
-    if (strcmp(command, "list") == 0) {
-        ret = cli_cmd_list(g_vault);
-        goto cleanup;
-    }
 
     /*
      * unlock is non-persistent in MVP. Treat it as password verification.
@@ -164,6 +160,9 @@ int main(int argc, char **argv) {
 
     if (strcmp(command, "add") == 0) {
         ret = cli_cmd_add(g_vault, argc - 1, &argv[1]);
+    }
+    else if (strcmp(command, "list") == 0) {
+        ret = cli_cmd_list(g_vault);
     }
     else if (strcmp(command, "show") == 0) {
         ret = cli_cmd_show(g_vault, argc - 1, &argv[1]);

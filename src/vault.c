@@ -870,49 +870,84 @@ int vault_decrypt_value(vault_t *vault,
 }
 
 char **vault_list_credentials(vault_t *vault, int *count) {
-    if (!vault || !count) {
+    if (!count) {
         return NULL;
     }
 
-    const char *query = "SELECT name FROM credentials ORDER BY name;";
+    *count = -1;
+
+    if (!vault || vault_is_locked(vault)) {
+        return NULL;
+    }
+
+    const char *sql = "SELECT name FROM credentials ORDER BY name ASC;";
+
     sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(vault->db, sql, -1, &stmt, NULL);
 
-    if (sqlite3_prepare_v2(vault->db, query, -1, &stmt, NULL) != SQLITE_OK) {
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Error: Failed to prepare credential list query: %s\n",
+                sqlite3_errmsg(vault->db));
         return NULL;
     }
 
-    /* Count rows */
+    int capacity = 8;
     int n = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
+
+    char **names = calloc((size_t)capacity, sizeof(char *));
+    if (!names) {
+        sqlite3_finalize(stmt);
+        return NULL;
+    }
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(stmt, 0);
+
+        if (!name) {
+            continue;
+        }
+
+        if (n == capacity) {
+            capacity *= 2;
+
+            char **tmp = realloc(names, (size_t)capacity * sizeof(char *));
+            if (!tmp) {
+                sqlite3_finalize(stmt);
+                vault_list_free(names, n);
+                return NULL;
+            }
+
+            names = tmp;
+        }
+
+        names[n] = strdup((const char *)name);
+        if (!names[n]) {
+            sqlite3_finalize(stmt);
+            vault_list_free(names, n);
+            return NULL;
+        }
+
         n++;
     }
 
-    if (n == 0) {
+    if (rc != SQLITE_DONE) {
+        fprintf(stderr, "Error: Failed while listing credentials: %s\n",
+                sqlite3_errmsg(vault->db));
         sqlite3_finalize(stmt);
-        *count = 0;
+        vault_list_free(names, n);
         return NULL;
-    }
-
-    /* Allocate array */
-    char **name_array = malloc(sizeof(char *) * (n + 1));
-    if (!name_array) {
-        sqlite3_finalize(stmt);
-        return NULL;
-    }
-
-    /* Reset and re-query */
-    sqlite3_reset(stmt);
-    int i = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        const char *name = (const char *)sqlite3_column_text(stmt, 0);
-        name_array[i++] = strdup(name);
     }
 
     sqlite3_finalize(stmt);
 
-    name_array[i] = NULL;  /* NULL-terminate for safety */
-    *count = i;
-    return name_array;
+    if (n == 0) {
+        free(names);
+        *count = 0;
+        return NULL;
+    }
+
+    *count = n;
+    return names;
 }
 
 void vault_list_free(char **names, int count) {
@@ -921,10 +956,9 @@ void vault_list_free(char **names, int count) {
     }
 
     for (int i = 0; i < count; i++) {
-        if (names[i]) {
-            free(names[i]);
-        }
+        free(names[i]);
     }
+
     free(names);
 }
 
