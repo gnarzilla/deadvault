@@ -208,12 +208,6 @@ vault unlock
 # Delete credential
 vault delete github-api
 
-# Generate a new Identity for Federation
-./deadlight_vault add my-blog-identity \
-    --type identity \
-    --algo ed25519 \
-    --generate
-
 # Output: 
 # Public Key: dead...beef (Share this in your DNS TXT or Profile)
 # Private Key: (Stored encrypted in DB)
