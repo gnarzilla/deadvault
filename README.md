@@ -4,9 +4,11 @@
 ![zero deps](https://img.shields.io/badge/deps-zero-success)
 ![300 LOC crypto](https://img.shields.io/badge/crypto-ChaCha20--Poly1305-blue)
 
-> A local-first vault that auto-authenticates CLI tools and proxied requests when networks are hostile or nonexistent.
-
 [Why This Exists](#why-this-exists) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Integration](#proxy-integration) · [Roadmap](#roadmap)
+
+A local-first vault that auto-authenticates CLI tools and proxied requests when networks are hostile or nonexistent.
+
+> Status: MVP core working. Supports local vault init, encrypted credential add/list/show/delete, and `exec` token substitution. Security audit pending; not recommended for production secrets yet.
 
 ## Why this exists
 
