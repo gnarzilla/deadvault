@@ -678,7 +678,8 @@ int vault_add_credential(vault_t *vault,
     free(encrypted_blob);
 
     if (rc != 0) {
-        fprintf(stderr, "Error: Failed to insert credential\n");
+        fprintf(stderr, "Error: Failed to insert credential: %s\n", 
+                sqlite3_errmsg(vault->db));
         return -1;
     }
 

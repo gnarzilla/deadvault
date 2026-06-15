@@ -228,25 +228,50 @@ static void poly1305_mac(uint8_t mac[16], const uint8_t *msg, size_t len,
         len -= block_len;
     }
 
-    // Finalize: h = (h + s) mod 2^128
-    uint64_t f = (uint64_t)h[0] + (uint64_t)s[0];
-    h[0] = (uint32_t)f;
-    f = (uint64_t)h[1] + (uint64_t)s[1] + (f >> 32);
-    h[1] = (uint32_t)f;
-    f = (uint64_t)h[2] + (uint64_t)s[2] + (f >> 32);
-    h[2] = (uint32_t)f;
-    f = (uint64_t)h[3] + (uint64_t)s[3] + (f >> 32);
-    h[3] = (uint32_t)f;
+    // Full carry propagation before reduction
+    uint32_t c;
+    c = h[1] >> 26; h[1] &= 0x3ffffff; h[2] += c;
+    c = h[2] >> 26; h[2] &= 0x3ffffff; h[3] += c;
+    c = h[3] >> 26; h[3] &= 0x3ffffff; h[4] += c;
+    c = h[4] >> 26; h[4] &= 0x3ffffff; h[0] += c * 5;
+    c = h[0] >> 26; h[0] &= 0x3ffffff; h[1] += c;
+
+    // Compute h + -p (where p = 2^130 - 5), select conditionally
+    uint32_t g[5];
+    g[0] = h[0] + 5; c = g[0] >> 26; g[0] &= 0x3ffffff;
+    g[1] = h[1] + c; c = g[1] >> 26; g[1] &= 0x3ffffff;
+    g[2] = h[2] + c; c = g[2] >> 26; g[2] &= 0x3ffffff;
+    g[3] = h[3] + c; c = g[3] >> 26; g[3] &= 0x3ffffff;
+    g[4] = h[4] + c - (1u << 26);
+
+    // If g[4] underflowed (high bit set), h < p so keep h; else use g
+    uint32_t mask = (uint32_t)(((int32_t)g[4]) >> 31);
+    for (int i = 0; i < 5; i++) {
+        h[i] = (h[i] & mask) | (g[i] & ~mask);
+    }
+
+    // Pack 26-bit limbs into four 32-bit words
+    uint32_t h0 = (h[0]       | (h[1] << 26)) & 0xffffffff;
+    uint32_t h1 = ((h[1] >> 6) | (h[2] << 20)) & 0xffffffff;
+    uint32_t h2 = ((h[2] >> 12) | (h[3] << 14)) & 0xffffffff;
+    uint32_t h3 = ((h[3] >> 18) | (h[4] <<  8)) & 0xffffffff;
+
+    // Add s with carry (mod 2^128)
+    uint64_t f;
+    f = (uint64_t)h0 + s[0]; h0 = (uint32_t)f;
+    f = (uint64_t)h1 + s[1] + (f >> 32); h1 = (uint32_t)f;
+    f = (uint64_t)h2 + s[2] + (f >> 32); h2 = (uint32_t)f;
+    f = (uint64_t)h3 + s[3] + (f >> 32); h3 = (uint32_t)f;
 
     // Output MAC (little-endian)
-    mac[0] = (h[0] >> 0) & 0xff; mac[1] = (h[0] >> 8) & 0xff;
-    mac[2] = (h[0] >> 16) & 0xff; mac[3] = (h[0] >> 24) & 0xff;
-    mac[4] = (h[1] >> 0) & 0xff; mac[5] = (h[1] >> 8) & 0xff;
-    mac[6] = (h[1] >> 16) & 0xff; mac[7] = (h[1] >> 24) & 0xff;
-    mac[8] = (h[2] >> 0) & 0xff; mac[9] = (h[2] >> 8) & 0xff;
-    mac[10] = (h[2] >> 16) & 0xff; mac[11] = (h[2] >> 24) & 0xff;
-    mac[12] = (h[3] >> 0) & 0xff; mac[13] = (h[3] >> 8) & 0xff;
-    mac[14] = (h[3] >> 16) & 0xff; mac[15] = (h[3] >> 24) & 0xff;
+    mac[0]  = (h0 >>  0) & 0xff; mac[1]  = (h0 >>  8) & 0xff;
+    mac[2]  = (h0 >> 16) & 0xff; mac[3]  = (h0 >> 24) & 0xff;
+    mac[4]  = (h1 >>  0) & 0xff; mac[5]  = (h1 >>  8) & 0xff;
+    mac[6]  = (h1 >> 16) & 0xff; mac[7]  = (h1 >> 24) & 0xff;
+    mac[8]  = (h2 >>  0) & 0xff; mac[9]  = (h2 >>  8) & 0xff;
+    mac[10] = (h2 >> 16) & 0xff; mac[11] = (h2 >> 24) & 0xff;
+    mac[12] = (h3 >>  0) & 0xff; mac[13] = (h3 >>  8) & 0xff;
+    mac[14] = (h3 >> 16) & 0xff; mac[15] = (h3 >> 24) & 0xff;
 }
 
 /* ============================================================================

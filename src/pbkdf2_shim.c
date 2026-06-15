@@ -10,6 +10,7 @@
 #include "pbkdf2_shim.h"
 #include <string.h>
 #include <stdint.h>
+#include <assert.h>
 
 /* ============================================================================
  * SHA256 Implementation (FIPS 180-4)
@@ -231,7 +232,8 @@ int vault_derive_key_pbkdf2_sha256(
 
         /* U₁ = HMAC-SHA256(password, salt || block_index) */
         {
-            uint8_t salt_block[salt_len + 4];
+            uint8_t salt_block[VAULT_SALT_LEN + 4];
+            assert(salt_len == VAULT_SALT_LEN);
             memcpy(salt_block, salt, salt_len);
             
             /* Encode block_index as big-endian 4-byte integer */
