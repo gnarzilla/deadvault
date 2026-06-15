@@ -23,11 +23,11 @@ Password managers solve this for browsers. Nothing solves it for terminals and p
 | **Authenticate through proxy.deadlight** | Browser extensions don't work with SOCKS/HTTP proxies | Vault talks to proxy via socket. Credentials injected server-side |
 | **Field laptop dies, switch to backup** | Cloud password managers need internet to sync | Export encrypted DB → USB stick → Import. 30 seconds, zero network |
 
-**vault.deadlight core purpose is to eliminate manual credential entry for CLI tools and proxies.**
+**deadvault core purpose is to eliminate manual credential entry for CLI tools and proxies.**
 
 ## Part of the Deadlight Ecosystem
 
-vault.deadlight extends **proxy.deadlight** with credential injection. Works standalone for CLI workflows, but shines when paired with the proxy.
+deadvault extends **deadlight-proxy** with credential injection. Works standalone for CLI workflows, but shines when paired with the proxy.
 
 ```
 ┌──────────────────────────────────────┐
@@ -60,8 +60,8 @@ vault.deadlight extends **proxy.deadlight** with credential injection. Works sta
 
 ```bash
 # Clone repository
-git clone https://github.com/gnarzilla/vault.deadlight
-cd vault.deadlight
+git clone https://github.com/gnarzilla/deadvault
+cd deadvault
 
 # Build (zero external dependencies)
 make
@@ -231,7 +231,7 @@ vault config set proxy.enabled true
 vault config set proxy.socket /var/run/deadlight_vault.sock
 
 # Restart proxy with vault integration
-# (proxy.deadlight will connect to socket on startup)
+# (deadlight-proxy will connect to socket on startup)
 ```
 
 ### How it works
@@ -239,8 +239,8 @@ vault config set proxy.socket /var/run/deadlight_vault.sock
 ```mermaid
 sequenceDiagram
     participant C as Client (curl)
-    participant P as proxy.deadlight
-    participant V as vault.deadlight
+    participant P as deadlight-proxy
+    participant V as deadvault
     participant R as Remote API
 
     C->>P: GET https://api.github.com/user
@@ -416,8 +416,8 @@ xcode-select --install
 ### Compile
 
 ```bash
-git clone https://github.com/gnarzilla/vault.deadlight
-cd vault.deadlight
+git clone https://github.com/gnarzilla/deadvault
+cd deadvault
 make
 
 # Output: ./deadlight_vault (~180KB)
@@ -448,7 +448,7 @@ make test-memory
 ## FAQ
 
 **Q: Why not just use `pass` or `gopass`?**  
-A: Those are great for managing passwords. vault.deadlight is focused on *auto-injection* into CLI tools and proxy.deadlight integration. Different goals.
+A: Those are great for managing passwords. deadvault is focused on *auto-injection* into CLI tools and proxy.deadlight integration. Different goals.
 
 **Q: Is this trying to replace 1Password/Bitwarden?**  
 A: No. Use those for browsers. This is for terminals and proxied connections.
