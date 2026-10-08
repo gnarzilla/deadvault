@@ -73,12 +73,12 @@ make
 # Creates ~/.deadlight/vault.db (encrypted SQLite)
 
 # Add your first credential
-./deadlight_vault add github-api \
+./deadvault add github-api \
     --type token \
     --value ghp_xxxxxxxxxxxx
 
 # Use it
-./deadlight_vault exec github-api -- \
+./deadvault exec github-api -- \
     curl -H "Authorization: Bearer {TOKEN}" \
     https://api.github.com/user
 # → {TOKEN} replaced with decrypted value, no clipboard involved
