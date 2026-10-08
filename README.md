@@ -68,7 +68,7 @@ make
 # → Outputs: deadlight_vault (~180KB)
 
 # Initialize vault
-./deadlight_vault init
+./deadvault init
 # Prompts for master password
 # Creates ~/.deadlight/vault.db (encrypted SQLite)
 
