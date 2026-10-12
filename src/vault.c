@@ -501,7 +501,7 @@ int vault_unlock(vault_t *vault, const char *master_password) {
 
     /* Derive key from password + stored salt */
     uint8_t derived_key[VAULT_KEY_LEN];
-    if (vault_derive_key_pbkdf2_sha256(password,
+    if (vault_derive_key_pbkdf2_sha256(master_password,
                                        vault->salt, VAULT_SALT_LEN,
                                        VAULT_KDF_ITERATIONS,
                                        derived_key) != 0) {

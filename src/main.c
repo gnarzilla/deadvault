@@ -152,7 +152,11 @@ int main(int argc, char **argv) {
      * All remaining commands need the master key.
      * For MVP, prompt each time.
      */
-    if (vault_unlock(g_vault, NULL) != 0) {
+    const char *env_pw = getenv("DEADVAULT_PASSWORD");
+    if (env_pw && *env_pw == '\0') {
+        env_pw = NULL;  /* treat empty as unset -> prompt */
+    }
+    if (vault_unlock(g_vault, env_pw) != 0) {
         fprintf(stderr, "Error: Failed to unlock vault\n");
         ret = 1;
         goto cleanup;
