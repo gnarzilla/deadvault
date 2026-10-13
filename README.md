@@ -14,21 +14,6 @@ A local-first vault that auto-authenticates CLI tools and proxied requests when 
 > A proof-of-concept credential-injection plugin exists on the proxy side.
 > Security audit pending; not recommended for production secrets yet.
 
-## Why this exists
-
-SSH into 15 servers a day. Curl 10 APIs. You authenticate to internal services over a VPN that drops every 20 minutes. **Typing passwords is the bottleneck.** Or it is for me at least, so I'm building this.
-
-Password managers solve this for browsers. Nothing solves it for terminals and proxied connections in the field.
-
-| Actual workflows | Why existing tools fail | How deadvault works |
-|---------------------|-------------------------|---------------------------|
-| **SSH to 10 boxes during an incident** | Type password 10 times or set up keys (but you're on a borrowed laptop) | Keys stored encrypted; per-command injection via `exec` today (ssh-agent auto-load planned) |
-| **curl GitHub API from satellite link** | Type token, connection drops mid-paste, retry | Token stored locally, injected into request headers. Works offline |
-| **Authenticate through proxy.deadlight** | Browser extensions don't work with SOCKS/HTTP proxies | PoC plugin on the proxy side consumes vault credentials and injects server-side |
-| **Field laptop dies, switch to backup** | Cloud password managers need internet to sync | Export encrypted DB → USB stick → Import. 30 seconds, zero network |
-
-**deadvault's core purpose is to eliminate manual credential entry for CLI tools and proxies.**
-
 ## Part of the Deadlight Ecosystem
 
 deadvault extends **deadlight-proxy** with credential injection. Works standalone for CLI workflows, but shines when paired with the proxy.
