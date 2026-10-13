@@ -1,14 +1,18 @@
 # Deadlight Credential Vault | Auto-Authentication Without the Internet
 
 ![vault.deadlight](https://img.shields.io/badge/vault-alpha-yellow)
-![zero deps](https://img.shields.io/badge/deps-zero-success)
-![300 LOC crypto](https://img.shields.io/badge/crypto-ChaCha20--Poly1305-blue)
+![deps](https://img.shields.io/badge/deps-openssl-blue)
+![crypto](https://img.shields.io/badge/crypto-ChaCha20--Poly1305-blue)
 
 [Why This Exists](#why-this-exists) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Integration](#proxy-integration) · [Roadmap](#roadmap)
 
 A local-first vault that auto-authenticates CLI tools and proxied requests when networks are hostile or nonexistent.
 
-> Status: MVP core working. Supports local vault init, encrypted credential add/list/show/delete, and `exec` token substitution. Security audit pending; not recommended for production secrets yet.
+> Status: MVP core working — init, add/list/show/delete, `exec` token substitution,
+> export/import, and non-interactive unlock via `DEADVAULT_PASSWORD`.
+> SSH-agent integration and the vault-side proxy socket API are not yet built.
+> A proof-of-concept credential-injection plugin exists on the proxy side.
+> Security audit pending; not recommended for production secrets yet.
 
 ## Why this exists
 
@@ -16,14 +20,14 @@ SSH into 15 servers a day. Curl 10 APIs. You authenticate to internal services o
 
 Password managers solve this for browsers. Nothing solves it for terminals and proxied connections in the field.
 
-| Actual workflows | Why existing tools fail | How vault.deadlight works |
+| Actual workflows | Why existing tools fail | How deadvault works |
 |---------------------|-------------------------|---------------------------|
-| **SSH to 10 boxes during an incident** | Type password 10 times or set up keys (but you're on a borrowed laptop) | `vault unlock` once → All SSH auths auto-injected via ssh-agent |
+| **SSH to 10 boxes during an incident** | Type password 10 times or set up keys (but you're on a borrowed laptop) | Keys stored encrypted; per-command injection via `exec` today (ssh-agent auto-load planned) |
 | **curl GitHub API from satellite link** | Type token, connection drops mid-paste, retry | Token stored locally, injected into request headers. Works offline |
-| **Authenticate through proxy.deadlight** | Browser extensions don't work with SOCKS/HTTP proxies | Vault talks to proxy via socket. Credentials injected server-side |
+| **Authenticate through proxy.deadlight** | Browser extensions don't work with SOCKS/HTTP proxies | PoC plugin on the proxy side consumes vault credentials and injects server-side |
 | **Field laptop dies, switch to backup** | Cloud password managers need internet to sync | Export encrypted DB → USB stick → Import. 30 seconds, zero network |
 
-**deadvault core purpose is to eliminate manual credential entry for CLI tools and proxies.**
+**deadvault's core purpose is to eliminate manual credential entry for CLI tools and proxies.**
 
 ## Part of the Deadlight Ecosystem
 
@@ -41,9 +45,10 @@ deadvault extends **deadlight-proxy** with credential injection. Works standalon
     │ CLI auto-    │         │ SOCKS/HTTP/  │
     │ auth + store │         │ MITM gateway │
     └──────────────┘         └──────────────┘
-           │
+
            │  (reuses crypto)
            ▼
+
     ┌──────────────┐
     │     lib      │
     │  .deadlight  │
@@ -51,8 +56,8 @@ deadvault extends **deadlight-proxy** with credential injection. Works standalon
     └──────────────┘
 ```
 
-**Standalone mode:** Auto-auth for SSH, curl, git, any CLI tool  
-**With proxy:** Credential injection into proxied requests (transparent to the tool)
+**Standalone mode:** Auto-auth for SSH keys, curl, git, any CLI tool
+**With proxy:** Credential injection into proxied requests (proof of concept; generalizing now)
 
 ## Quick Start
 
@@ -63,9 +68,9 @@ deadvault extends **deadlight-proxy** with credential injection. Works standalon
 git clone https://github.com/gnarzilla/deadvault
 cd deadvault
 
-# Build (zero external dependencies)
+# Build (links OpenSSL)
 make
-# → Outputs: deadlight_vault (~180KB)
+# → Outputs: deadvault (~1.2 MB)
 
 # Initialize vault
 ./deadvault init
@@ -82,6 +87,9 @@ make
     curl -H "Authorization: Bearer {TOKEN}" \
     https://api.github.com/user
 # → {TOKEN} replaced with decrypted value, no clipboard involved
+
+# Skip the password prompt (scripts, wrappers)
+DEADVAULT_PASSWORD='...' ./deadvault list
 ```
 
 Your credentials are now offline-available and never touch your keyboard again.
@@ -90,14 +98,14 @@ Your credentials are now offline-available and never touch your keyboard again.
 
 ### The 30-second version
 
-1. **Encrypt at rest:** Master password → ChaCha20-Poly1305 key → Encrypted SQLite blobs
-2. **Decrypt on demand:** `vault exec github-api -- curl ...` → Decrypt token → Inject into command
-3. **Wipe immediately:** Decrypted credential lives in memory for <100ms, then `secure_zero`
-4. **Optional proxy mode:** Vault listens on Unix socket → proxy requests credentials → Injects into proxied traffic
+1. **Encrypt at rest:** Master password → PBKDF2-SHA256 (100k iterations) → ChaCha20-Poly1305 key → Encrypted SQLite blobs
+2. **Decrypt on demand:** `deadvault exec github-api -- curl ...` → Decrypt token → Inject into command
+3. **Wipe immediately:** Decrypted credential lives in memory briefly, then `secure_zero`
+4. **Proxy mode (in progress):** PoC plugin on the proxy side consumes vault-stored credentials and injects them into proxied traffic. The vault-side socket API it needs is not yet built.
 
 ### The cryptographic details
 
-All crypto is ~300 LOC of public domain C (ChaCha20-Poly1305 + PBKDF2-SHA256):
+~300 LOC of public domain C (ChaCha20-Poly1305 + PBKDF2-SHA256):
 
 ```c
 // Key derivation (master password → encryption key)
@@ -121,7 +129,7 @@ chacha20_poly1305_decrypt(
     encrypted_blob,
     derived_key,
     nonce,
-    plaintext           // ← This exists for ~100ms
+    plaintext           // ← Wiped right after use
 );
 
 secure_zero(plaintext, length);  // Wipe memory
@@ -135,8 +143,8 @@ secure_zero(plaintext, length);  // Wipe memory
 
 **Why PBKDF2 over Argon2?**
 - Already in lib.deadlight → No new code
-- Sufficient for our threat model (offline attacks unlikely, 100k iterations)
 - Smaller binary size
+- Honest caveat: 100k iterations is modest against GPU-assisted offline attack — which is exactly what a stolen database enables. **Strong master passwords are load-bearing.** Argon2 is the likely direction when this is revisited.
 
 ### Database Schema (SQLite)
 
@@ -159,19 +167,21 @@ CREATE TABLE credentials (
 );
 ```
 
-**Total size for 50 credentials:** ~40KB encrypted
+**Total size for 50 credentials:** tens of KB encrypted
 
 ## Core Features
 
 ### What it does
 - **Encrypts credentials locally** – SQLite database, ChaCha20-Poly1305
-- **Auto-injects into CLI commands** – `vault exec name -- command`
-- **SSH agent integration** – Auto-loads SSH keys on unlock
-- **Proxy socket API** – proxy.deadlight can request credentials
+- **Auto-injects into CLI commands** – `deadvault exec name -- command` (`{TOKEN}` / `{PASSWORD}` substitution)
+- **Non-interactive unlock** – `DEADVAULT_PASSWORD` env var skips the password prompt (for scripts and wrappers)
+- **Biometric unlock wrapper** – Termux-only, experimental Level 1 (see below)
 - **Offline export/import** – Encrypted DB dumps for airgapped transfers
-- **Memory safety** – Secure wipes, constant-time comparisons
+- **Memory safety** – Secure wipes on credential material
 
-### What it doesn't do
+### What it doesn't (yet) do
+- X SSH-agent auto-load on unlock (planned — `unlock` is non-persistent in the MVP, each command re-derives the key)
+- X Vault-side proxy socket API (a PoC plugin exists on the proxy side; the vault side is in progress)
 - X Browser integration (use your browser's password manager)
 - X Cloud sync (export/import manually, or use encrypted USB sticks)
 - X 2FA/TOTP generation (out of scope, use `oathtool`)
@@ -182,91 +192,62 @@ CREATE TABLE credentials (
 
 ```bash
 # Initialize new vault
-vault init
+./deadvault init
 
 # Add credentials
-vault add github-api --type token --value ghp_xxx
-vault add aws-prod --type password --username admin --password secret
-vault add id_rsa --type ssh_key --file ~/.ssh/id_rsa
+./deadvault add github-api --type token --value ghp_xxx
+./deadvault add deploy-key --type ssh_key --file ~/.ssh/id_ed25519
+./deadvault add db-pass --type password            # prompts for value
+# Flags: --type token|password|ssh_key, --value <val>, --file <path>, --metadata <json>
 
-# List stored credentials
-vault list
+# List / inspect
+./deadvault list
+./deadvault show github-api                        # metadata only, never the secret
 
 # Use credential in command (auto-inject)
-vault exec github-api -- curl -H "Authorization: Bearer {TOKEN}" ...
-vault exec aws-prod -- aws s3 ls  # Injects AWS_ACCESS_KEY_ID env vars
+./deadvault exec github-api -- curl -H "Authorization: Bearer {TOKEN}" https://api.github.com/user
 
-# Export vault (for backup or transfer)
-vault export --output backup.vault.enc
-# Transfer to another machine via USB/LoRa/whatever
-vault import backup.vault.enc
+# Non-interactive (scripts, wrappers)
+DEADVAULT_PASSWORD='...' ./deadvault list          # no prompt
 
-# Lock/unlock (clears derived key from memory)
-vault lock
-vault unlock
+# Export / import (encrypted, for backup or airgapped transfer)
+./deadvault export --output backup.vault.enc
+./deadvault import backup.vault.enc
+
+# Lock/unlock
+./deadvault lock                                   # wipes derived key (mostly a no-op in one-shot CLI mode)
+./deadvault unlock                                 # verifies master password (non-persistent in MVP)
 
 # Delete credential
-vault delete github-api
+./deadvault delete github-api
+```
 
-# Output: 
-# Public Key: dead...beef (Share this in your DNS TXT or Profile)
-# Private Key: (Stored encrypted in DB)
+### Biometric unlock (Termux, experimental)
+
+A Level 1 convenience wrapper — educational, not the final form. The fingerprint is a **gate, not a key**: on success the wrapper releases the master password from `~/.deadlight/.biometric_pw` (mode 600, Termux app-private storage) into `DEADVAULT_PASSWORD`. It stops a casual phone borrower, not root malware. The master password always remains a fallback.
+
+```bash
+# Prerequisites: Termux:API app (same source as your Termux) + pkg install termux-api
+cp contrib/dvault contrib/dvault-enroll ~/bin/
+chmod +x ~/bin/dvault ~/bin/dvault-enroll
+
+dvault-enroll      # type the master password once, verified against the vault
+dvault list        # fingerprint prompt, zero typing
 ```
 
 ## Proxy Integration
 
-When running **proxy.deadlight**, vault can inject credentials into proxied requests:
+**Status: proof of concept.** A credential-injection plugin on the proxy side consumes
+vault-stored credentials and injects them into proxied requests server-side, so the
+client tool never sees the secret. The vault-side socket API, the domain→credential
+mapping configuration, and the schema expansion the plugin needs are not yet built —
+that's the current work.
 
-### Setup
+Target flow once generalized:
 
-```bash
-# Enable proxy mode (creates Unix socket)
-vault config set proxy.enabled true
-vault config set proxy.socket /var/run/deadlight_vault.sock
-
-# Restart proxy with vault integration
-# (deadlight-proxy will connect to socket on startup)
 ```
-
-### How it works
-
-```mermaid
-sequenceDiagram
-    participant C as Client (curl)
-    participant P as deadlight-proxy
-    participant V as deadvault
-    participant R as Remote API
-
-    C->>P: GET https://api.github.com/user
-    P->>P: Detect auth required for api.github.com
-    P->>V: Request credential "github-api" (via socket)
-    V->>V: Decrypt credential
-    V->>P: Return token (ephemeral)
-    P->>P: Inject "Authorization: Bearer ..." header
-    P->>R: Forward request with auth
-    R->>P: 200 OK (user data)
-    P->>C: Forward response
-    V->>V: Wipe decrypted token from memory
-```
-
-**Transparent to the client.** You run:
-```bash
-curl --proxy socks5://localhost:1080 https://api.github.com/user
-```
-
-The proxy injects credentials automatically. No manual token pasting.
-
-### Configuration
-
-Tell vault which credentials to use for which domains:
-
-```bash
-vault add github-api \
-    --type token \
-    --value ghp_xxx \
-    --proxy-match "api.github.com"
-
-# Now all requests to api.github.com through the proxy auto-authenticate
+Client (curl) → deadlight-proxy → detects auth needed → asks vault → vault decrypts
+→ proxy injects Authorization header → remote API → response back → vault wipes plaintext
 ```
 
 ## Use Cases
@@ -275,16 +256,7 @@ vault add github-api \
 
 **Problem:** SSH to 20 AWS instances during incident response. Satellite link drops every 5 minutes.
 
-**Solution:**
-```bash
-vault add aws-ssh --type ssh_key --file ~/.ssh/aws.pem
-vault unlock  # Once per session
-
-# All subsequent SSH commands auto-authenticate
-for host in $(cat production_hosts.txt); do
-    ssh -o ProxyCommand="vault-ssh-proxy" ubuntu@$host "systemctl restart app"
-done
-```
+**Status:** Partially — keys store encrypted today and inject per-command via `exec`; transparent ssh-agent auto-load is planned. Until then, this is the gap that matters most.
 
 ### API Workflows Without Clipboard
 
@@ -292,8 +264,8 @@ done
 
 **Solution:**
 ```bash
-vault add stripe-test --type token --value sk_test_xxx
-vault exec stripe-test -- curl https://api.stripe.com/v1/charges \
+./deadvault add stripe-test --type token --value sk_test_xxx
+./deadvault exec stripe-test -- curl https://api.stripe.com/v1/charges \
     -H "Authorization: Bearer {TOKEN}"
 ```
 
@@ -304,11 +276,11 @@ vault exec stripe-test -- curl https://api.stripe.com/v1/charges \
 **Solution:**
 ```bash
 # On primary (before disaster)
-vault export --output /mnt/usb/backup.vault.enc
+./deadvault export --output /mnt/usb/backup.vault.enc
 
 # On backup laptop (after disaster)
-vault import /mnt/usb/backup.vault.enc
-vault unlock
+./deadvault import /mnt/usb/backup.vault.enc
+./deadvault unlock
 # All credentials restored, zero network needed
 ```
 
@@ -316,38 +288,28 @@ vault unlock
 
 **Problem:** VPN requires MFA every 2 hours. Internal APIs need tokens. Browser doesn't help.
 
-**Solution:**
-```bash
-# Run proxy with vault integration
-proxy.deadlight --vault-socket /var/run/deadlight_vault.sock
-
-# Configure tools to use proxy
-export HTTP_PROXY=http://localhost:8080
-export HTTPS_PROXY=http://localhost:8080
-
-# All curl/wget/git/etc auto-authenticate through proxy
-curl https://internal-api.corp/data
-# → Vault injects token, proxy forwards, tool never sees credential
-```
+**Status:** Works against the PoC plugin; generalizing the vault side now.
 
 ## Roadmap
 
-### MVP (Current Focus)
--  ChaCha20-Poly1305 implementation (~300 LOC)
--  SQLite integration (encrypted blobs)
--  CLI commands: init, add, list, exec
--  Memory safety (secure_zero)
--  SSH agent integration
--  Proxy socket API
+### Done (MVP core)
+- ChaCha20-Poly1305 implementation (~300 LOC)
+- SQLite integration (encrypted blobs)
+- CLI: init, add, list, show, exec, delete, export, import
+- Memory safety (secure_zero on credential material)
+- Non-interactive unlock via `DEADVAULT_PASSWORD`
+- Termux biometric wrapper (Level 1, educational)
 
-**Target:** Working end-to-end by July 2026
+### In progress
+- Proxy-side credential injection (PoC exists; needs schema expansion + vault-side socket API)
+- Domain→credential mapping for the proxy
 
-### Post-MVP (If Users Want It)
-- Export/import encrypted backups
-- `vault exec` environment variable injection (not just {TOKEN} replacement)
+### Planned
+- SSH-agent integration (auto-load keys on unlock)
+- Persistent unlock / agent daemon — the north star that unifies biometric unlock, ssh-agent, and the proxy socket API
+- `vault exec` environment variable injection (not just `{TOKEN}` replacement)
 - Expiry handling (warn before credential expires)
 - Audit log (optional, disabled by default)
-- systemd integration (auto-unlock on login)
 
 ### Explicitly Out of Scope
 - Browser extensions (use existing tools)
@@ -361,15 +323,14 @@ curl https://internal-api.corp/data
 ### Threat Model
 
 **Protected against:**
--  Database theft (encrypted with strong key derivation)
--  Memory dumps (credentials wiped after <100ms)
--  Timing attacks (constant-time comparisons)
--  Tampering (Poly1305 MAC catches modifications)
+- Database theft (encrypted; strength depends on the master password — see below)
+- Memory dumps (credential material wiped after use)
+- Tampering (Poly1305 MAC catches modifications)
 
 **NOT protected against:**
 - X Root-level malware (assumes trusted OS)
-- X Unlocked vault on compromised system (user must lock vault when not in use)
-- X Weak master passwords (enforcement planned, not yet implemented)
+- X Unlocked vault on compromised system
+- X Weak master passwords — no enforcement, and a weak password makes a stolen DB quickly crackable. This is the single most load-bearing user decision in the system.
 - X Physical attacks on running system (use full-disk encryption + lock timeouts)
 
 ### Why No Cloud Sync?
@@ -385,6 +346,7 @@ curl https://internal-api.corp/data
 ### Audit Status
 
 - **Crypto implementation:** Public domain ChaCha20-Poly1305 (reference: DJB's code)
+- **KDF:** PBKDF2-SHA256, 100k iterations (see caveat above)
 - **SQLite:** Industry standard, used by browsers/phones/everything
 - **Total custom code:** ~800 LOC (excluding SQLite amalgamation)
 
@@ -396,16 +358,18 @@ curl https://internal-api.corp/data
 
 ```bash
 # Debian/Ubuntu
-apt-get install build-essential
+apt-get install build-essential libssl-dev
 
 # Alpine
-apk add gcc musl-dev
+apk add gcc musl-dev openssl-dev
 
 # macOS
 xcode-select --install
-```
+# + OpenSSL via Homebrew: brew install openssl
 
-**That's it.** No external libraries.
+# Termux (Android)
+pkg install git clang make openssl
+```
 
 ### Compile
 
@@ -414,7 +378,7 @@ git clone https://github.com/gnarzilla/deadvault
 cd deadvault
 make
 
-# Output: ./deadlight_vault (~180KB)
+# Output: ./deadvault (~1.2 MB, links OpenSSL)
 ```
 
 ### Cross-compile for ARM
@@ -432,35 +396,35 @@ make CC=aarch64-linux-gnu-gcc
 ```bash
 make test
 
-# Crypto primitive tests
-make test-crypto
-
-# Valgrind memory leak check
-make test-memory
+# PBKDF2/crypto primitive tests
+make test-pbkdf2
 ```
 
 ## FAQ
 
-**Q: Why not just use `pass` or `gopass`?**  
+**Q: Why not just use `pass` or `gopass?**
 A: Those are great for managing passwords. deadvault is focused on *auto-injection* into CLI tools and proxy.deadlight integration. Different goals.
 
-**Q: Is this trying to replace 1Password/Bitwarden?**  
+**Q: Is this trying to replace 1Password/Bitwarden?**
 A: No. Use those for browsers. This is for terminals and proxied connections.
 
-**Q: Can I import from other password managers?**  
-A: Not yet. Planned for post-MVP. For now, manual `vault add` commands.
+**Q: Why does every command ask for the master password?**
+A: Unlock is non-persistent in the MVP — each invocation re-derives the key. Use `DEADVAULT_PASSWORD` for scripts, or the biometric wrapper on Termux. A persistent agent daemon is the planned fix.
 
-**Q: What if I forget my master password?**  
+**Q: Can I import from other password managers?**
+A: Not yet. For now, manual `deadvault add` commands.
+
+**Q: What if I forget my master password?**
 A: You lose all credentials. No recovery mechanism by design. Write it down.
 
-**Q: Does this work on Windows?**  
+**Q: Does this work on Windows?**
 A: WSL works. Native Windows support not planned (accept PRs though).
 
-**Q: Why SQLite instead of flat files?**  
+**Q: Why SQLite instead of flat files?**
 A: Atomic transactions (corruption resistance), easier querying for proxy, better tooling.
 
-**Q: How do I back up my vault?**  
-A: `vault export` creates encrypted dump. Store on USB stick, encrypted cloud storage, whatever.
+**Q: How do I back up my vault?**
+A: `deadvault export` creates an encrypted dump. Store on USB stick, encrypted cloud storage, whatever. Never commit `*.db`, `*.vault.enc`, or `.biometric_pw` to git.
 
 ## Contributing
 
@@ -469,7 +433,6 @@ Open to PRs for:
 - Documentation improvements
 - Test coverage
 - Platform support (BSD, etc.)
-
 
 ## License
 
@@ -481,5 +444,3 @@ ChaCha20-Poly1305 implementation is public domain (DJB's original code)
 
 - **GitHub:** [@gnarzilla](https://github.com/gnarzilla)
 - **Email:** gnarzilla@deadlight.boo
-
----
