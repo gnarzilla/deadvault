@@ -4,7 +4,7 @@
 ![deps](https://img.shields.io/badge/deps-openssl-blue)
 ![crypto](https://img.shields.io/badge/crypto-ChaCha20--Poly1305-blue)
 
-[Why This Exists](#why-this-exists) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [Integration](#proxy-integration) · [Roadmap](#roadmap)
+[Quick Start](#quick-start) · [How It Works](#how-it-works) · [Integration](#proxy-integration) · [Roadmap](#roadmap)
 
 A local-first vault that auto-authenticates CLI tools and proxied requests when networks are hostile or nonexistent.
 
