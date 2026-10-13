@@ -1,0 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# dvault-enroll — one-time: verify password, store for biometric release
+read -rsp "Master password: " pw; echo
+DEADVAULT_PASSWORD="$pw" "$HOME/deadvault/deadvault" unlock >/dev/null 2>&1 || { echo "wrong password" >&2; exit 1; }
+printf '%s' "$pw" > "$HOME/.deadlight/.biometric_pw"
+chmod 600 "$HOME/.deadlight/.biometric_pw"
+unset pw
+echo "enrolled — fingerprint unlocks from now on"

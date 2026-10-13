@@ -123,12 +123,15 @@ int main(int argc, char **argv) {
     /*
      * Commands that do not need decryption.
      */
-
+    const char *env_pw = getenv("DEADVAULT_PASSWORD");
+    if (env_pw && *env_pw == '\0') {
+        env_pw = NULL;  /* treat empty as unset -> prompt */
+    }
     /*
      * unlock is non-persistent in MVP. Treat it as password verification.
      */
     if (strcmp(command, "unlock") == 0) {
-        ret = vault_unlock(g_vault, NULL);
+        ret = vault_unlock(g_vault, env_pw);
         if (ret == 0) {
             fprintf(stderr, "Vault password verified. Note: unlock is non-persistent in MVP.\n");
         } else {
@@ -152,10 +155,6 @@ int main(int argc, char **argv) {
      * All remaining commands need the master key.
      * For MVP, prompt each time.
      */
-    const char *env_pw = getenv("DEADVAULT_PASSWORD");
-    if (env_pw && *env_pw == '\0') {
-        env_pw = NULL;  /* treat empty as unset -> prompt */
-    }
     if (vault_unlock(g_vault, env_pw) != 0) {
         fprintf(stderr, "Error: Failed to unlock vault\n");
         ret = 1;

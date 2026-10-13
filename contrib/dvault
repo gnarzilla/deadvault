@@ -1,0 +1,6 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# dvault — fingerprint-gated deadvault
+BLOB="$HOME/.deadlight/.biometric_pw"
+[ -f "$BLOB" ] || { echo "not enrolled — run dvault-enroll first" >&2; exit 1; }
+termux-fingerprint -t "Unlock deadvault" >/dev/null 2>&1 || { echo "biometric failed" >&2; exit 1; }
+DEADVAULT_PASSWORD="$(cat "$BLOB")" "$HOME/deadvault/deadvault" "$@"
